@@ -3,3 +3,4 @@ flask_dance
 jq
 werkzeug
 python-dotenv
+apscheduler

@@ -4,16 +4,37 @@ import functools
 import requests
 import jq
 import os
+import atexit
 from werkzeug.middleware.proxy_fix import ProxyFix
+from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 
 
 load_dotenv()
 
+
 whitelist = [
-    "randy3k",
-    "randybot"
+    "randy3k"
 ]
+
+
+def update_whitelist():
+    global whitelist
+    sheetid = os.environ['SHEET_ID']
+    r = requests.get(
+        f"https://sheets.googleapis.com/v4/spreadsheets/{sheetid}/values/A2:A",
+        params={"key": os.environ['SHEET_KEY']})
+
+    if r.status_code == 200:
+        whitelist = [x[0] for x in r.json()["values"] if x]
+
+
+update_whitelist()
+scheduler = BackgroundScheduler()
+scheduler.add_job(func=update_whitelist, trigger="interval", seconds=60)
+scheduler.start()
+atexit.register(lambda: scheduler.shutdown())
+
 
 app = Flask(__name__)
 # otherwise flask dance thinks it is http
