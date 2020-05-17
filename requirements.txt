@@ -4,4 +4,3 @@ jq
 werkzeug
 python-dotenv
 oauth2client
-apscheduler
