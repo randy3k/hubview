@@ -1,39 +1,52 @@
 from flask import Flask, abort, render_template, redirect, url_for, session, request
 from flask_dance.contrib.github import make_github_blueprint, github
+from werkzeug.middleware.proxy_fix import ProxyFix
+from oauth2client.service_account import ServiceAccountCredentials
+from dotenv import load_dotenv
 import functools
 import requests
 import jq
 import os
-import atexit
-from werkzeug.middleware.proxy_fix import ProxyFix
-from apscheduler.schedulers.background import BackgroundScheduler
-from dotenv import load_dotenv
+import time
 
 
 load_dotenv()
 
 
-whitelist = [
-    "randy3k"
-]
+class Whitelist():
 
+    def __init__(self):
+        self._cred = ServiceAccountCredentials.from_json_keyfile_name(
+            "service_account.json",
+            scopes="https://www.googleapis.com/auth/spreadsheets.readonly")
+        self._token = self._cred.get_access_token()
+        self._whitelist = []
+        self._last_updated = None
 
-def update_whitelist():
-    global whitelist
-    sheetid = os.environ['SHEET_ID']
-    r = requests.get(
-        f"https://sheets.googleapis.com/v4/spreadsheets/{sheetid}/values/A2:A",
-        params={"key": os.environ['SHEET_KEY']})
+    def _get_white_list(self):
+        if self._cred.access_token_expired:
+            self._token = self._cred.get_access_token()
 
-    if r.status_code == 200:
-        whitelist = [x[0] for x in r.json()["values"] if x]
+        sheetid = os.environ['SHEET_ID']
+        r = requests.get(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{sheetid}/values/A:A",
+            headers={"Authorization": f"Bearer {self._token.access_token}"})
 
+        if r.status_code == 200:
+            whitelist = [x[0] for x in r.json()["values"] if x]
+        else:
+            whitelist = ["randy3k"]
 
-update_whitelist()
-scheduler = BackgroundScheduler()
-scheduler.add_job(func=update_whitelist, trigger="interval", seconds=60)
-scheduler.start()
-atexit.register(lambda: scheduler.shutdown())
+        self._whitelist = whitelist
+        self._last_updated = time.time()
+
+        return whitelist
+
+    def get_white_list(self):
+        if not self._last_updated or time.time() - self._last_updated > 60:
+            return self._get_white_list()
+        else:
+            return self._whitelist
 
 
 app = Flask(__name__)
@@ -60,6 +73,7 @@ app.register_blueprint(github_blueprint, url_prefix='/login')
 
 dir_filter = jq.compile('.[] | select(.type == "dir") | .name')
 file_filter = jq.compile('.[] | select(.type == "file") | .name')
+whitelist = Whitelist()
 
 
 def login_required(func):
@@ -71,7 +85,7 @@ def login_required(func):
 
         login = session["login"]
 
-        if login not in whitelist:
+        if login not in whitelist.get_white_list():
             abort(403)
 
         return func(*args, **kwargs)
@@ -131,9 +145,13 @@ def view_page(owner, repo, subpath):
 @login_required
 def go():
     repo = request.args.get("repo", "")
-    if repo and repo.startswith("https://github.com/"):
+    if not repo:
+        redirect(url_for("home"))
+
+    if repo.startswith("https://github.com/"):
         return redirect(repo[19:])
-    return redirect(repo)
+    else:
+        return redirect(repo)
 
 
 @app.route("/_login")
@@ -151,16 +169,17 @@ def logout():
 @app.route("/")
 def home():
     if github.authorized:
-        # try three times before we gave up
-        for i in range(3):
-            resp = github.get("/user")
-            if resp.ok:
-                break
-        if not resp.ok:
-            session.clear()
-            return redirect(url_for("home"))
+        if "login" not in session:
+            # try three times before we gave up
+            for i in range(3):
+                resp = github.get("/user")
+                if resp.ok:
+                    break
+            if not resp.ok:
+                session.clear()
+                return redirect(url_for("home"))
 
-        session["login"] = resp.json()["login"]
+            session["login"] = resp.json()["login"]
 
     if "previous_url" in session:
         previous_url = session["previous_url"]

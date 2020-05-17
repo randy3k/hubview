@@ -3,4 +3,5 @@ flask_dance
 jq
 werkzeug
 python-dotenv
+oauth2client
 apscheduler
