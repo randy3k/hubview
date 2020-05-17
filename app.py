@@ -21,14 +21,15 @@ app.wsgi_app = ProxyFix(app.wsgi_app)
 app.secret_key = os.urandom(20).hex()
 
 if os.environ.get("FLASK_ENV", "development") == "development":
+    os.environ['FLASK_ENV'] = "development"
     os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
-    app.config["DEBUG"] = 1
-
+    host = "localhost"
     github_blueprint = make_github_blueprint(
         client_id=os.environ.get("GITHUB_CLIENT_ID_DEVELOP"),
         client_secret=os.environ.get("GITHUB_CLIENT_SECRET_DEVELOP"),
         scope="repo")
 else:
+    host = "0.0.0.0"
     github_blueprint = make_github_blueprint(
         client_id=os.environ.get("GITHUB_CLIENT_ID"),
         client_secret=os.environ.get("GITHUB_CLIENT_SECRET"),
@@ -47,19 +48,10 @@ def login_required(func):
             session["previous_url"] = request.path
             return(redirect(url_for("github.login")))
 
-        if "login" not in session:
-            # try three times before we gave up
-            for i in range(3):
-                resp = github.get("/user")
-                if resp.ok:
-                    break
-            if not resp.ok:
-                abort(500)
-            session["login"] = resp.json()["login"]
-
         login = session["login"]
+
         if login not in whitelist:
-            abort(404)
+            abort(403)
 
         return func(*args, **kwargs)
 
@@ -114,17 +106,55 @@ def view_page(owner, repo, subpath):
     return redirect(f"https://github.com/{owner}/{repo}/blob/master/{subpath}")
 
 
+@app.route("/_go")
+@login_required
+def go():
+    repo = request.args.get("repo", "")
+    if repo and repo.startswith("https://github.com/"):
+        return redirect(repo[19:])
+    return redirect(repo)
+
+
+@app.route("/_login")
+def login():
+    return(redirect(url_for("github.login")))
+
+
+@app.route("/_logout")
+def logout():
+    if github.authorized:
+        session.clear()
+    return(redirect(url_for("home")))
+
+
 @app.route("/")
 def home():
+    if github.authorized:
+        # try three times before we gave up
+        for i in range(3):
+            resp = github.get("/user")
+            if resp.ok:
+                break
+        if not resp.ok:
+            session.clear()
+            return redirect(url_for("home"))
+
+        session["login"] = resp.json()["login"]
+
     if "previous_url" in session:
         previous_url = session["previous_url"]
         session.pop("previous_url", None)
         if github.authorized:
             return(redirect(previous_url))
 
-    return ""
+    login = session["login"] if "login" in session else None
+    return render_template(
+        "index.html",
+        authorized=github.authorized,
+        login=login,
+        client_id=github_blueprint.client_id)
 
 
 if __name__ == "__main__":
 
-    app.run(host='0.0.0.0', port=8080)
+    app.run(host=host, port=8080)
