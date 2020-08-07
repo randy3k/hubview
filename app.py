@@ -2,7 +2,6 @@ from flask import Flask, abort, render_template, redirect, url_for, session, req
 from flask_dance.contrib.github import make_github_blueprint, github
 import functools
 import requests
-import jq
 import os
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
@@ -37,9 +36,6 @@ else:
 
 app.register_blueprint(github_blueprint, url_prefix='/login')
 
-dir_filter = jq.compile('.[] | select(.type == "dir") | .name')
-file_filter = jq.compile('.[] | select(.type == "file") | .name')
-
 
 def login_required(func):
     @functools.wraps(func)
@@ -73,10 +69,10 @@ def list_directory(owner, repo, subpath):
     d["subpath"] = subpath
 
     j = r.json()
-    folders = [d for d in dir_filter.input(j).all() if not d.startswith(".")]
-    d["folders"] = folders
-    files = [f for f in file_filter.input(j).all() if not f.startswith(".")]
-    d["files"] = files
+    folders = [d["name"] for d in j if d["type"] == "dir"]
+    d["folders"] = [f for f in folders if not f.startswith(".")]
+    files = [f["name"] for f in j if f["type"] == "file"]
+    d["files"] = [f for f in files if not f.startswith(".")]
     return render_template("tree.html", **d)
 
 
