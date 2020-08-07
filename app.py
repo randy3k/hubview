@@ -29,13 +29,13 @@ if os.environ.get("FLASK_ENV", "development") == "development":
     github_blueprint = make_github_blueprint(
         client_id=os.environ.get("GITHUB_CLIENT_ID_DEVELOP"),
         client_secret=os.environ.get("GITHUB_CLIENT_SECRET_DEVELOP"),
-        scope="repo")
+        scope="")
 else:
     host = "0.0.0.0"
     github_blueprint = make_github_blueprint(
         client_id=os.environ.get("GITHUB_CLIENT_ID"),
         client_secret=os.environ.get("GITHUB_CLIENT_SECRET"),
-        scope="repo")
+        scope="")
 
 app.register_blueprint(github_blueprint, url_prefix='/login')
 
@@ -74,7 +74,8 @@ def censor_repo(func):
 
 
 def list_directory(owner, repo, subpath):
-    token = github.token["access_token"]
+    # token = github.token["access_token"]
+    token = os.environ.get("GITHUB_TOKEN")
 
     r = requests.get(
         f"https://api.github.com/repos/{owner}/{repo}/contents/{subpath}",
@@ -106,12 +107,12 @@ def repo_home(owner, repo):
 @login_required
 @censor_repo
 def view_page(owner, repo, subpath):
-    token = github.token["access_token"]
-
     if subpath.endswith("/"):
         return list_directory(owner, repo, subpath)
 
     if subpath.endswith(".html"):
+        # token = github.token["access_token"]
+        token = os.environ.get("GITHUB_TOKEN")
         r = requests.get(
             f"https://raw.githubusercontent.com/{owner}/{repo}/master/{subpath}",
             headers={"Authorization": f"token {token}"})
