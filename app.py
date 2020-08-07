@@ -3,15 +3,18 @@ from flask_dance.contrib.github import make_github_blueprint, github
 import functools
 import requests
 import os
+import re
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 
 
 load_dotenv()
 
-whitelist = [
-    "randy3k",
-    "randybot"
+user_whitelist = [
+    "randy3k"
+]
+repo_whitelist = [
+    "randy3k/.*"
 ]
 
 app = Flask(__name__)
@@ -46,10 +49,26 @@ def login_required(func):
 
         login = session["login"]
 
-        if login not in whitelist:
+        if user_whitelist is not None and login not in user_whitelist:
             abort(403)
 
         return func(*args, **kwargs)
+
+    return _
+
+
+def censor_repo(func):
+    @functools.wraps(func)
+    def _(owner, repo, *args, **kwargs):
+        r = owner + "/" + repo
+        if repo_whitelist is not None:
+            for pattern in repo_whitelist:
+                if re.match(pattern, r):
+                    break
+            else:
+                abort(403)
+
+        return func(owner, repo, *args, **kwargs)
 
     return _
 
@@ -78,12 +97,14 @@ def list_directory(owner, repo, subpath):
 
 @app.route("/<owner>/<repo>/")
 @login_required
+@censor_repo
 def repo_home(owner, repo):
     return list_directory(owner, repo, "")
 
 
 @app.route("/<owner>/<repo>/<path:subpath>")
 @login_required
+@censor_repo
 def view_page(owner, repo, subpath):
     token = github.token["access_token"]
 
